@@ -1,0 +1,33 @@
+{
+  "name": "poker-collection-tracker",
+  "version": "1.0.0",
+  "description": "扑克牌收藏追踪器 - 记录和追踪 54 张扑克牌的收集情况",
+  "main": "./out/main/index.js",
+  "author": "PokerTrack",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && vue-tsc --noEmit -p tsconfig.web.json",
+    "preview": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
+    "dist": "electron-vite build && electron-builder --win",
+    "dist:dir": "electron-vite build && electron-builder --win --dir",
+    "icon": "node scripts/generate-icon.js"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "electron": "^31.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.2.0",
+    "vue-tsc": "^2.0.0"
+  }
+}

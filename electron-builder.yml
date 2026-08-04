@@ -1,0 +1,38 @@
+appId: com.pokertrack.collection
+productName: PokerCollectionTracker
+copyright: Copyright © 2026 PokerTrack
+directories:
+  output: dist
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  - "!**/*.{ts,tsx,js.map}"
+  - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
+  - "!{electron.vite.config.ts,electron-builder.yml}"
+  - "!{tsconfig*.json}"
+  - "!{scripts/**,.trae/**,task.md}"
+asarUnpack:
+  - resources/**
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  language: 2052
+  # 关闭 EB 自动创建快捷方式：改由 build/installer.nsh 的完成页复选框 + customInstall 宏按用户选择创建
+  createDesktopShortcut: false
+  createStartMenuShortcut: false
+  shortcutName: PokerCollectionTracker
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+  include: build/installer.nsh
+  runAfterFinish: false  # 完成页不自动运行（由用户勾选运行）
