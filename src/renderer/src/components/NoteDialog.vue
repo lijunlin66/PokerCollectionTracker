@@ -22,10 +22,13 @@
           maxlength="500"
         ></textarea>
         <div class="char-count">{{ note.length }}/500</div>
+        <p v-if="error" class="save-error" role="alert">{{ error }}</p>
       </div>
       <div class="dialog-footer">
         <button class="btn" @click="$emit('close')">取消</button>
-        <button class="btn btn-primary" @click="onSave">保存</button>
+        <button class="btn btn-primary" :disabled="saving" @click="onSave">
+          {{ saving ? '保存中...' : '保存' }}
+        </button>
       </div>
     </div>
   </div>
@@ -35,7 +38,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import type { Card } from '@shared/types'
 
-const props = defineProps<{ card: Card }>()
+const props = defineProps<{ card: Card; saving: boolean; error: string | null }>()
 const emit = defineEmits<{
   (e: 'save', cardId: string, note: string): void
   (e: 'close'): void
@@ -55,6 +58,11 @@ function onSave(): void {
 </script>
 
 <style scoped>
+.save-error {
+  margin-top: 8px;
+  color: var(--color-danger);
+  font-size: 12px;
+}
 .note-dialog {
   background: #fff;
   border-radius: var(--radius);

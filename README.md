@@ -142,6 +142,16 @@ npm run build
 
 构建三端产物（main / preload / renderer）+ Vue + TypeScript 类型检查，输出到 `out/`。
 
+### 自动化回归测试
+
+```powershell
+npm test
+```
+
+测试覆盖 CSV 多行备注往返、JSON/CSV 导入校验、完整牌组校验、保存失败、连续操作顺序和批量筛选范围。测试使用隔离的存储与 IPC 替身，不读取或改写实际收藏数据。
+
+导入文件必须包含有效且不重复的卡片 ID，以及 `true` / `false` 收集状态。部分牌组导入会将未提供的牌恢复为未收集；任何无效行都会使整次导入失败，不覆盖当前收藏。读取本地数据失败时会保留原文件并显示错误，可打开数据目录备份、修复后重新加载。
+
 ### 打包安装包
 
 ```powershell
@@ -263,6 +273,8 @@ JSON 结构示例：
 |------|------|
 | `npm run dev` | 开发模式（HMR 热更新） |
 | `npm run build` | 类型检查 + 构建产物 |
+| `npm test` | 运行数据与保存流程回归测试 |
+| `npm run typecheck` | 主进程、预加载与渲染进程类型检查 |
 | `npm run dist` | 构建 + 打包 NSIS 安装包 |
 | `npm run icon` | 重新生成应用图标 |
 

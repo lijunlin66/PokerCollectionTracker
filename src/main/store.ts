@@ -2,64 +2,58 @@
 import Store from 'electron-store'
 import type { Card, CollectionData } from '../shared/types'
 import { generateDeck } from '../shared/cardData'
+import { validateCards } from '../shared/collectionData'
 
-const store = new Store<CollectionData>({
-  name: 'collection-data',
-  defaults: {
-    cards: generateDeck(),
-    version: '1.0.0',
-    updatedAt: new Date().toISOString()
-  }
-})
+let storage: Store<CollectionData> | undefined
 
-/** 校验卡片数组是否合法（54 张、id 唯一） */
-function validateCards(cards: unknown): cards is Card[] {
-  if (!Array.isArray(cards)) return false
-  if (cards.length === 0) return false
-  const ids = new Set<string>()
-  for (const c of cards) {
-    if (!c || typeof c !== 'object') return false
-    if (typeof c.id !== 'string' || typeof c.suit !== 'string') return false
-    if (typeof c.isCollected !== 'boolean') return false
-    if (ids.has(c.id)) return false
-    ids.add(c.id)
+function getStorage(): Store<CollectionData> {
+  // 延迟到 IPC 请求时读取文件：JSON 损坏或无权限时仍能启动界面并显示错误。
+  if (!storage) {
+    storage = new Store<CollectionData>({
+      name: 'collection-data',
+      clearInvalidConfig: false,
+      defaults: {
+        cards: generateDeck(),
+        version: '1.0.0',
+        updatedAt: new Date().toISOString()
+      }
+    })
   }
-  return true
+  return storage
 }
 
 export function getCards(): Card[] {
-  const cards = store.get('cards')
+  const cards = getStorage().get('cards')
   if (validateCards(cards)) return cards
-  // 数据损坏时重置为默认
-  const fresh = generateDeck()
-  store.set('cards', fresh)
-  return fresh
+  // 保留原文件以便恢复，不能在读取失败时静默清空收藏。
+  throw new Error('收藏数据格式无效，请备份数据文件后修复或导入有效备份')
 }
 
 export function saveCards(cards: Card[]): void {
-  store.set('cards', cards)
-  store.set('updatedAt', new Date().toISOString())
+  if (!validateCards(cards)) throw new Error('收藏数据必须包含完整且有效的 54 张牌')
+  getStorage().set({ cards, updatedAt: new Date().toISOString() })
 }
 
 export function updateCard(cardId: string, data: Partial<Card>): Card | null {
   const cards = getCards()
   const index = cards.findIndex((c) => c.id === cardId)
   if (index === -1) return null
+  if (!data || typeof data !== 'object' || Array.isArray(data) ||
+      Object.keys(data).some((key) => !['isCollected', 'note', 'collectedAt'].includes(key))) {
+    throw new Error('只能修改收集状态、备注与收集时间')
+  }
   cards[index] = { ...cards[index], ...data }
-  store.set('cards', cards)
-  store.set('updatedAt', new Date().toISOString())
+  if (!cards[index].isCollected) cards[index].collectedAt = undefined
+  saveCards(cards)
   return cards[index]
 }
 
 export function resetCollection(): Card[] {
   const fresh = generateDeck()
-  store.set('cards', fresh)
-  store.set('updatedAt', new Date().toISOString())
+  saveCards(fresh)
   return fresh
 }
 
 export function getStore(): CollectionData {
-  return store.store
+  return { ...getStorage().store, cards: getCards() }
 }
-
-export default store

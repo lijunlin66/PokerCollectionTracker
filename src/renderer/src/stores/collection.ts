@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Card, CollectionStats, ExportFormat, Suit } from '@shared/types'
 import {
-  generateDeck,
   SUIT_ORDER,
   RANK_ORDER,
   jokerSortWeight
@@ -19,6 +18,10 @@ export const useCollectionStore = defineStore('collection', () => {
   const loading = ref(false)
   const saving = ref(false)
   const lastSavedAt = ref<string | null>(null)
+  const error = ref<string | null>(null)
+  const loaded = ref(false)
+  let queue: Promise<unknown> = Promise.resolve()
+  let pendingWrites = 0
 
   // UI 状态
   const filterSuit = ref<FilterSuit>('all')
@@ -28,139 +31,132 @@ export const useCollectionStore = defineStore('collection', () => {
 
   // ===== Actions =====
 
-  /** 加载卡片数据 */
-  async function loadCards(): Promise<void> {
-    loading.value = true
-    try {
-      const data = await window.electronAPI.getCards()
-      cards.value = data && data.length > 0 ? data : generateDeck()
-    } catch (err) {
-      console.error('加载数据失败:', err)
-      cards.value = generateDeck()
-    } finally {
-      loading.value = false
+  // 串行执行读写及文件对话框操作，提交成功后再更新 UI。
+  // 后续操作即使在前一次失败后也能继续，且不会提交 Vue Proxy。
+  function enqueue<T>(label: string, action: () => Promise<T>, fallback: T, writes = false): Promise<T> {
+    if (writes) {
+      pendingWrites++
+      saving.value = true
     }
-  }
-
-  /** 切换单卡收集状态 */
-  async function toggleCollect(cardId: string): Promise<void> {
-    const card = cards.value.find((c) => c.id === cardId)
-    if (!card) return
-    card.isCollected = !card.isCollected
-    card.collectedAt = card.isCollected ? new Date().toISOString() : undefined
-    await markSaving()
-    try {
-      await window.electronAPI.updateCard(cardId, {
-        isCollected: card.isCollected,
-        collectedAt: card.collectedAt
-      })
-      lastSavedAt.value = new Date().toISOString()
-    } catch (err) {
-      console.error('保存失败:', err)
-    } finally {
-      saving.value = false
-    }
-  }
-
-  /** 设置单卡收集状态（用于批量） */
-  async function setCollected(cardId: string, isCollected: boolean): Promise<void> {
-    const card = cards.value.find((c) => c.id === cardId)
-    if (!card || card.isCollected === isCollected) return
-    card.isCollected = isCollected
-    card.collectedAt = isCollected ? new Date().toISOString() : undefined
-  }
-
-  /** 更新单卡备注 */
-  async function updateNote(cardId: string, note: string): Promise<void> {
-    const card = cards.value.find((c) => c.id === cardId)
-    if (!card) return
-    card.note = note.trim() || undefined
-    await markSaving()
-    try {
-      await window.electronAPI.updateCard(cardId, { note: card.note })
-      lastSavedAt.value = new Date().toISOString()
-    } catch (err) {
-      console.error('保存备注失败:', err)
-    } finally {
-      saving.value = false
-    }
-  }
-
-  /** 批量标记：按花色或全部 */
-  async function batchMark(
-    target: FilterSuit,
-    isCollected: boolean
-  ): Promise<void> {
-    const targets =
-      target === 'all'
-        ? cards.value
-        : cards.value.filter((c) => c.suit === target)
-    const now = new Date().toISOString()
-    targets.forEach((c) => {
-      c.isCollected = isCollected
-      c.collectedAt = isCollected ? now : undefined
-    })
-    await markSaving()
-    try {
-      await window.electronAPI.saveCards(cards.value)
-      lastSavedAt.value = now
-    } catch (err) {
-      console.error('批量保存失败:', err)
-    } finally {
-      saving.value = false
-    }
-  }
-
-  /** 重置全部收集状态 */
-  async function resetCollection(): Promise<void> {
-    try {
-      const fresh = await window.electronAPI.resetCollection()
-      cards.value = fresh
-      lastSavedAt.value = new Date().toISOString()
-    } catch (err) {
-      console.error('重置失败:', err)
-    }
-  }
-
-  /** 批量标记当前 filteredCards 中的所有牌（对应当前筛选+搜索条件） */
-  async function batchMarkFiltered(isCollected: boolean): Promise<void> {
-    const ids = new Set(filteredCards.value.map((c) => c.id))
-    const now = new Date().toISOString()
-    cards.value.forEach((c) => {
-      if (ids.has(c.id)) {
-        c.isCollected = isCollected
-        c.collectedAt = isCollected ? now : undefined
+    const result = queue.then(async () => {
+      error.value = null
+      try {
+        return await action()
+      } catch (err) {
+        error.value = label + '：' + (err instanceof Error ? err.message : String(err))
+        return fallback
+      } finally {
+        if (writes) saving.value = --pendingWrites > 0
       }
     })
-    await markSaving()
-    try {
-      await window.electronAPI.saveCards(cards.value)
+    queue = result
+    return result
+  }
+
+  function requireLoaded(): void {
+    if (!loaded.value) throw new Error('请先成功加载收藏数据')
+  }
+
+  async function loadCards(): Promise<void> {
+    loading.value = true
+    await enqueue('加载失败', async () => {
+      loaded.value = false
+      cards.value = await window.electronAPI.getCards()
+      loaded.value = true
+    }, undefined)
+    loading.value = false
+  }
+
+  async function persistCard(cardId: string, data: Partial<Card>): Promise<void> {
+    const updated = await window.electronAPI.updateCard(cardId, data)
+    if (!updated) throw new Error('未找到需要保存的卡片')
+    const index = cards.value.findIndex((card) => card.id === cardId)
+    if (index >= 0) cards.value[index] = updated
+    lastSavedAt.value = new Date().toISOString()
+  }
+
+  function toggleCollect(cardId: string): Promise<boolean> {
+    return enqueue('保存失败', async () => {
+      requireLoaded()
+      const card = getCardById(cardId)
+      if (!card) return false
+      const isCollected = !card.isCollected
+      await persistCard(cardId, {
+        isCollected,
+        collectedAt: isCollected ? new Date().toISOString() : undefined
+      })
+      return true
+    }, false, true)
+  }
+
+  function setCollected(cardId: string, isCollected: boolean): Promise<boolean> {
+    return markIds([cardId], isCollected)
+  }
+
+  function updateNote(cardId: string, note: string): Promise<boolean> {
+    return enqueue('保存备注失败', async () => {
+      requireLoaded()
+      await persistCard(cardId, { note: note.trim() || undefined })
+      return true
+    }, false, true)
+  }
+
+  function markIds(cardIds: string[], isCollected: boolean): Promise<boolean> {
+    const ids = new Set(cardIds)
+    return enqueue('批量保存失败', async () => {
+      requireLoaded()
+      const now = new Date().toISOString()
+      let changed = false
+      const next = cards.value.map((card) => {
+        // 浅拷贝得到只包含标量字段的普通对象，IPC 可进行结构化克隆。
+        const copy = { ...card }
+        if (ids.has(card.id) && card.isCollected !== isCollected) {
+          copy.isCollected = isCollected
+          copy.collectedAt = isCollected ? now : undefined
+          changed = true
+        }
+        return copy
+      })
+      if (!changed) return true
+      if (!await window.electronAPI.saveCards(next)) throw new Error('数据未写入')
+      cards.value = next
       lastSavedAt.value = now
-    } catch (err) {
-      console.error('批量保存失败:', err)
-    } finally {
-      saving.value = false
-    }
+      return true
+    }, false, true)
   }
 
-  /** 导出数据 */
-  async function exportData(format: ExportFormat): Promise<string | null> {
-    return await window.electronAPI.exportData(format)
+  function batchMark(target: FilterSuit, isCollected: boolean): Promise<boolean> {
+    return markIds(cards.value.filter((card) => target === 'all' || card.suit === target)
+      .map((card) => card.id), isCollected)
   }
 
-  /** 导入数据 */
-  async function importData(): Promise<boolean> {
-    const merged = await window.electronAPI.importData()
-    if (merged && merged.length > 0) {
-      cards.value = merged
+  function batchMarkFiltered(isCollected: boolean): Promise<boolean> {
+    // 点击时固定筛选范围，避免等待保存期间筛选条件变化影响操作对象。
+    return markIds(filteredCards.value.map((card) => card.id), isCollected)
+  }
+
+  function resetCollection(): Promise<boolean> {
+    return enqueue('重置失败', async () => {
+      cards.value = await window.electronAPI.resetCollection()
+      loaded.value = true
       lastSavedAt.value = new Date().toISOString()
       return true
-    }
-    return false
+    }, false, true)
   }
 
-  async function markSaving(): Promise<void> {
-    saving.value = true
+  function exportData(format: ExportFormat): Promise<string | null> {
+    return enqueue('导出失败', () => window.electronAPI.exportData(format), null)
+  }
+
+  function importData(): Promise<boolean> {
+    return enqueue('导入失败', async () => {
+      const merged = await window.electronAPI.importData()
+      if (!merged) return false
+      cards.value = merged
+      loaded.value = true
+      lastSavedAt.value = new Date().toISOString()
+      return true
+    }, false, true)
   }
 
   // ===== Getters =====
@@ -252,6 +248,7 @@ export const useCollectionStore = defineStore('collection', () => {
     loading,
     saving,
     lastSavedAt,
+    error,
     filterSuit,
     filterStatus,
     searchQuery,

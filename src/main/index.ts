@@ -3,7 +3,7 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, shell } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync } from 'fs'
 import { getCards, saveCards, updateCard, resetCollection, getStore } from './store'
-import { generateDeck } from '../shared/cardData'
+import { cardsToCsv, parseImport } from '../shared/collectionData'
 import type { Card, ExportFormat } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -184,34 +184,7 @@ ipcMain.handle('import-data', async () => {
 
   try {
     const content = readFileSync(filePath, 'utf-8')
-    let importedCards: Card[] = []
-
-    if (ext === 'json') {
-      const parsed = JSON.parse(content)
-      const arr: unknown = parsed.cards ?? parsed
-      if (!Array.isArray(arr)) throw new Error('JSON 文件格式无效')
-      importedCards = (arr as Record<string, unknown>[]).map(mapToCard).filter(Boolean) as Card[]
-    } else if (ext === 'csv') {
-      importedCards = csvToCards(content)
-    } else {
-      throw new Error('不支持的文件类型')
-    }
-
-    if (importedCards.length === 0) throw new Error('未解析到有效卡片数据')
-
-    // 与默认牌组合并：保留默认牌顺序，应用导入的收集状态与备注
-    const deck = generateDeck()
-    const importedMap = new Map(importedCards.map((c) => [c.id, c]))
-    const merged = deck.map((c) => {
-      const imp = importedMap.get(c.id)
-      if (!imp) return c
-      return {
-        ...c,
-        isCollected: imp.isCollected,
-        note: imp.note,
-        collectedAt: imp.collectedAt
-      }
-    })
+    const merged = parseImport(content, ext ?? '')
     saveCards(merged)
     return merged
   } catch (err) {
@@ -222,107 +195,6 @@ ipcMain.handle('import-data', async () => {
     return null
   }
 })
-
-// ===== CSV 工具 =====
-
-function escapeCsv(value: string): string {
-  if (value == null) return ''
-  const needsQuote = /[",\n\r]/.test(value)
-  const v = value.replace(/"/g, '""')
-  return needsQuote ? `"${v}"` : v
-}
-
-function cardsToCsv(cards: Card[]): string {
-  const header = 'id,suit,rank,displayName,isCollected,note,collectedAt'
-  const rows = cards.map((c) =>
-    [
-      c.id,
-      c.suit,
-      c.rank,
-      c.displayName,
-      c.isCollected ? 'true' : 'false',
-      c.note ?? '',
-      c.collectedAt ?? ''
-    ]
-      .map((v) => escapeCsv(String(v)))
-      .join(',')
-  )
-  return [header, ...rows].join('\n')
-}
-
-function parseCsvLine(line: string): string[] {
-  const result: string[] = []
-  let cur = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          cur += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        cur += ch
-      }
-    } else {
-      if (ch === ',') {
-        result.push(cur)
-        cur = ''
-      } else if (ch === '"') {
-        inQuotes = true
-      } else {
-        cur += ch
-      }
-    }
-  }
-  result.push(cur)
-  return result
-}
-
-function csvToCards(content: string): Card[] {
-  const lines = content.replace(/^\ufeff/, '').split(/\r?\n/).filter((l) => l.trim() !== '')
-  if (lines.length < 2) return []
-  const header = parseCsvLine(lines[0]).map((h) => h.trim())
-  const idx = (name: string): number => header.findIndex((h) => h.toLowerCase() === name)
-  const iId = idx('id')
-  const iSuit = idx('suit')
-  const iRank = idx('rank')
-  const iName = idx('displayname')
-  const iCollected = idx('iscollected')
-  const iNote = idx('note')
-  const iAt = idx('collectedat')
-  const cards: Card[] = []
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCsvLine(lines[i])
-    if (iId < 0 || !cols[iId]) continue
-    cards.push({
-      id: cols[iId],
-      suit: (iSuit >= 0 ? cols[iSuit] : 'spade') as Card['suit'],
-      rank: (iRank >= 0 ? cols[iRank] : 'A') as Card['rank'],
-      displayName: iName >= 0 ? cols[iName] : cols[iId],
-      isCollected: iCollected >= 0 ? cols[iCollected].toLowerCase() === 'true' : false,
-      note: iNote >= 0 && cols[iNote] ? cols[iNote] : undefined,
-      collectedAt: iAt >= 0 && cols[iAt] ? cols[iAt] : undefined
-    })
-  }
-  return cards
-}
-
-function mapToCard(obj: Record<string, unknown>): Card | null {
-  if (!obj || typeof obj.id !== 'string') return null
-  return {
-    id: obj.id as string,
-    suit: (obj.suit as Card['suit']) ?? 'spade',
-    rank: (obj.rank as Card['rank']) ?? 'A',
-    displayName: (obj.displayName as string) ?? obj.id,
-    isCollected: Boolean(obj.isCollected),
-    note: typeof obj.note === 'string' ? obj.note : undefined,
-    collectedAt: typeof obj.collectedAt === 'string' ? obj.collectedAt : undefined
-  }
-}
 
 // ===== 应用生命周期 =====
 

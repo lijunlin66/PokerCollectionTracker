@@ -7,12 +7,14 @@
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && vue-tsc --noEmit -p tsconfig.web.json",
+    "build": "npm run typecheck && electron-vite build",
+    "test": "node --test tests/*.test.cjs",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json",
-    "dist": "electron-vite build && electron-builder --win",
-    "dist:dir": "electron-vite build && electron-builder --win --dir",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir",
     "icon": "node scripts/generate-icon.js"
   },
   "dependencies": {

@@ -13,6 +13,11 @@
 
     <FilterBar />
 
+    <div v-if="store.error" class="app-error" role="alert">
+      <span>{{ store.error }}</span>
+      <button class="btn btn-sm" @click="store.loadCards">重新加载</button>
+    </div>
+
     <main class="app-main">
       <div v-if="store.loading" class="app-loading">加载中...</div>
       <CardGrid
@@ -28,11 +33,13 @@
 
     <StatusBar :stats="store.stats" />
 
-    <SaveIndicator :show="store.saving" :saved-at="store.lastSavedAt" />
+    <SaveIndicator :show="store.saving" :saved-at="store.lastSavedAt" :error="store.error" />
 
     <NoteDialog
       v-if="noteTarget"
       :card="noteTarget"
+      :saving="store.saving"
+      :error="store.error"
       @save="onNoteSave"
       @close="noteTarget = null"
     />
@@ -47,7 +54,7 @@
       :secondary-text="confirmState.secondaryText"
       :icon="confirmState.icon"
       :danger="confirmState.danger"
-      @confirm="confirmState?.onConfirm?.(); (confirmState.closeOnConfirm !== false) && (confirmState = null)"
+      @confirm="onConfirm"
       @secondary="confirmState?.onSecondary?.()"
       @cancel="confirmState?.onCancel?.(); confirmState = null"
     />
@@ -57,7 +64,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useCollectionStore } from './stores/collection'
-import type { FilterSuit } from './stores/collection'
 import type { Card, ExportFormat } from '@shared/types'
 import AppHeader from './components/AppHeader.vue'
 import StatisticsPanel from './components/StatisticsPanel.vue'
@@ -87,6 +93,13 @@ interface ConfirmState {
   icon?: string
 }
 const confirmState = ref<ConfirmState | null>(null)
+
+function onConfirm(): void {
+  const state = confirmState.value
+  if (!state) return
+  if (state.closeOnConfirm !== false) confirmState.value = null
+  state.onConfirm()
+}
 
 onMounted(() => {
   store.loadCards()
@@ -184,12 +197,20 @@ function onEditNote(card: Card): void {
 }
 
 async function onNoteSave(cardId: string, note: string): Promise<void> {
-  await store.updateNote(cardId, note)
-  noteTarget.value = null
+  if (await store.updateNote(cardId, note)) noteTarget.value = null
 }
 </script>
 
 <style scoped>
+.app-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 24px;
+  background: #fff0ee;
+  color: var(--color-danger);
+}
 .app-main {
   flex: 1;
   overflow-y: auto;

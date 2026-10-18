@@ -63,6 +63,7 @@ const currentFilterLabel = computed(() => {
   }
   if (store.filterStatus === 'collected') parts.push('已收集')
   else if (store.filterStatus === 'uncollected') parts.push('未收集')
+  if (store.searchQuery.trim()) parts.push(`搜索：${store.searchQuery.trim()}`)
   return parts.join(' · ')
 })
 </script>

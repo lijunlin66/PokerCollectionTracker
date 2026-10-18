@@ -8,58 +8,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 
 const props = defineProps<{
   show: boolean
   savedAt: string | null
+  error: string | null
 }>()
 
 const visible = ref(false)
 let hideTimer: ReturnType<typeof setTimeout> | null = null
-let savedTimer: ReturnType<typeof setTimeout> | null = null
-
 watch(
-  () => props.show,
-  (saving) => {
-    if (saving) {
-      // 保存中：立即显示
-      if (hideTimer) {
-        clearTimeout(hideTimer)
-        hideTimer = null
-      }
-      if (savedTimer) {
-        clearTimeout(savedTimer)
-        savedTimer = null
-      }
-      visible.value = true
+  () => [props.show, props.savedAt, props.error] as const,
+  ([saving, at, error]) => {
+    if (hideTimer) clearTimeout(hideTimer)
+    hideTimer = null
+    visible.value = !error && (saving || !!at)
+    if (visible.value && !saving) {
+      hideTimer = setTimeout(() => { visible.value = false }, 2000)
     }
-  }
+  },
+  { immediate: true }
 )
 
-watch(
-  () => props.savedAt,
-  (at) => {
-    if (at && !props.show) {
-      // 已保存：切换到"已保存"状态，2 秒后淡出
-      visible.value = true
-      if (hideTimer) clearTimeout(hideTimer)
-      hideTimer = setTimeout(() => {
-        visible.value = false
-      }, 2000)
-    }
-  }
-)
-
-// 保存中 → 已保存的过渡
-watch(
-  () => props.show,
-  (saving, prev) => {
-    if (!saving && prev) {
-      // 刚从保存中切到非保存，等 savedAt 触发
-    }
-  }
-)
+onUnmounted(() => { if (hideTimer) clearTimeout(hideTimer) })
 </script>
 
 <style scoped>

@@ -83,6 +83,7 @@ const displayRank = computed(() => {
 function formatDate(iso: string): string {
   try {
     const d = new Date(iso)
+    if (!Number.isFinite(d.getTime())) return ''
     return `${d.getMonth() + 1}/${d.getDate()}`
   } catch {
     return ''
